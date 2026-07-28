@@ -1,17 +1,39 @@
 import sys
-sys.path.append("/content/RAG")
-
 import os
+
+# Compute the project root relative to this file's own location, instead
+# of hardcoding a path - works no matter what folder the repo is cloned
+# into (fixes the /content/RAG vs /content/document-rag mismatch found
+# when testing the clean final notebook).
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(PROJECT_ROOT)
+
 from app.config import CONFIG
 if CONFIG.use_drive_model_cache:
     os.makedirs(CONFIG.model_cache_dir, exist_ok=True)
     os.environ["HF_HOME"] = CONFIG.model_cache_dir
 
+import io
+from collections import deque
+
+log_buffer = deque(maxlen=300)
+
+class TeeOutput:
+    def __init__(self, original):
+        self.original = original
+    def write(self, text):
+        self.original.write(text)
+        if text.strip():
+            log_buffer.append(text.strip())
+    def flush(self):
+        self.original.flush()
+
+sys.stdout = TeeOutput(sys.stdout)
+
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from typing import List, Optional
+from typing import Optional
 
 from app.pipeline.ingest_pipeline import ingest_document
 from app.pipeline.query_pipeline import answer_question
@@ -22,9 +44,6 @@ init_db()
 
 app = FastAPI(title="Document Intelligence API")
 
-# CORS: allows our frontend (served from the same or a different origin)
-# to actually call these endpoints from browser JavaScript. Without this,
-# browsers block cross-origin requests by default as a security measure.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,18 +54,20 @@ app.add_middleware(
 
 @app.get("/api/documents")
 def get_documents():
-    """Returns all ingested documents with their metadata."""
     docs = list_documents()
     return {"documents": docs}
 
 
+@app.get("/api/logs")
+def get_logs():
+    return {"logs": list(log_buffer)}
+
+
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)):
-    """Accepts a file upload, runs it through the ingestion pipeline."""
     supported = (".pdf", ".txt", ".md", ".docx")
     if not file.filename.lower().endswith(supported):
         return {"status": "error", "message": f"Unsupported file type. Supported: {', '.join(supported)}"}
-
     file_bytes = await file.read()
     result = ingest_document(file_bytes, file.filename)
     return result
@@ -54,11 +75,6 @@ async def upload(file: UploadFile = File(...)):
 
 @app.post("/api/ask")
 def ask(question: str = Form(...), document_ids: Optional[str] = Form(None)):
-    """
-    Answers a question, optionally scoped to specific documents.
-    document_ids arrives as a comma-separated string from the form
-    (simpler than JSON for this case) - empty/None means search all.
-    """
     doc_id_list = document_ids.split(",") if document_ids else None
     result = answer_question(question, document_ids=doc_id_list)
     return result
@@ -66,11 +82,8 @@ def ask(question: str = Form(...), document_ids: Optional[str] = Form(None)):
 
 @app.delete("/api/documents/{doc_id}")
 def delete(doc_id: str):
-    """Deletes a document and all its associated data."""
     result = delete_document(doc_id)
     return result
 
 
-# Serve the frontend's static files (HTML/CSS/JS) directly from FastAPI,
-# so the whole app - frontend and backend - is reachable from one URL.
-app.mount("/", StaticFiles(directory="/content/RAG/app/frontend", html=True), name="frontend")
+app.mount("/", StaticFiles(directory=os.path.join(PROJECT_ROOT, "app", "frontend"), html=True), name="frontend")
