@@ -1,0 +1,14 @@
+PyMuPDF
+pytesseract
+sentence-transformers
+transformers
+accelerate
+bitsandbytes
+chromadb
+tiktoken
+rank_bm25
+python-docx
+fastapi
+uvicorn
+python-multipart
+pyngrok
