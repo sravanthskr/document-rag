@@ -3,17 +3,11 @@ import os
 class Config:
     project_root = "/content/document-rag"
 
-    # Data (uploaded docs, vector DB, SQLite) still persists to Drive -
-    # this is small and worth keeping so your documents survive between
-    # sessions. Only the large model cache is disabled below.
     data_dir = "/content/drive/MyDrive/rag_platform_data"
     upload_dir = os.path.join(data_dir, "uploads")
     chroma_dir = os.path.join(data_dir, "chroma")
     sqlite_path = os.path.join(data_dir, "registry.db")
 
-    # Models re-download each fresh Colab session instead of being cached
-    # to Drive - keeps Drive usage minimal, at the cost of a longer wait
-    # (~10 min for the 7B model) on every new session.
     use_drive_model_cache = False
     model_cache_dir = os.path.join(data_dir, "model_cache")
 
@@ -22,3 +16,9 @@ class Config:
     reranker_model = "BAAI/bge-reranker-base"
 
 CONFIG = Config()
+
+# Ensure all data folders exist before anything (SQLite, ChromaDB, file
+# uploads) tries to write into them - needed on a fresh Drive that's
+# never had this app's folder structure created before.
+os.makedirs(CONFIG.upload_dir, exist_ok=True)
+os.makedirs(CONFIG.chroma_dir, exist_ok=True)
